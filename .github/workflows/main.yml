@@ -1,10 +1,8 @@
-name: DB Setup and Crawl
+name: DB Setup, Seed & Read
 
-# 1. 언제 실행할지 정의합니다.
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -12,32 +10,59 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 2. 소스 코드를 체크아웃
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 3. MySQL Action 실행
       - name: Start MySQL service
         uses: mirromutth/mysql-action@v1.1
         with:
-          'host port': 3800               # (키에 공백이 있으므로 따옴표로 감싸야 합니다)
+          'host port': 3800
           'container port': 3306
           'character set server': utf8
           'collation server': utf8_general_ci
           'mysql version': 8.0
           'mysql database': test
-          'mysql root password': pwroot   # secrets 네임스페이스 사용
+          'mysql root password': ${{ secrets.PWROOT }}
           'mysql user': test
-          'mysql password': pwtest
+          'mysql password': ${{ secrets.PWTEST }}
 
-      # 4. DB 접속 확인 (옵션)
       - name: Wait for MySQL to be ready
         run: |
           until mysqladmin ping \
             --host=127.0.0.1 --port=3800 \
-            --user=root --password="pwtest" --silent; do
+            --user=test --password="${{ secrets.PWTEST }}" --silent; do
             echo "Waiting for MySQL..."
             sleep 1
           done
 
+      - name: Seed sample table & data
+        run: |
+          mysql \
+            --host=127.0.0.1 --port=3800 \
+            --user=test --password="${{ secrets.PWTEST }}" \
+            -e "
+              CREATE TABLE IF NOT EXISTS sample (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(50) NOT NULL
+              );
+              INSERT INTO sample (name) VALUES
+                ('Alice'), ('Bob'), ('Charlie')
+              ON DUPLICATE KEY UPDATE name=name;
+            "
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Install dependencies
+        run: npm install mysql2
+
+      - name: Run sample DB reader
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3800
+          DB_USER: test
+          DB_PASSWORD: ${{ secrets.PWTEST }}
+          DB_NAME: test
+        run: node page/read-db.js
