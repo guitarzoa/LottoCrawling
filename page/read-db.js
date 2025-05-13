@@ -1,26 +1,36 @@
 // page/read-db.js
-// Requires: npm install mysql2
-import mysql from 'mysql2/promise';
+const mysql = require('mysql2/promise');
 
 async function main() {
-  const conn = await mysql.createConnection({
-    host:   process.env.DB_HOST,
-    port:   Number(process.env.DB_PORT),
-    user:   process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-  });
+  const {
+    DB_HOST = '127.0.0.1',
+    DB_PORT = '3800',
+    DB_USER = 'test',
+    DB_PASSWORD = 'pwtest',
+    DB_NAME = 'test',
+  } = process.env;
 
-  const [rows] = await conn.query('SELECT * FROM sample');
-  console.log('🗒️ Sample data from DB:');
-  rows.forEach(row => {
-    console.log(`  • [${row.id}] ${row.name}`);
-  });
+  let conn;
+  try {
+    conn = await mysql.createConnection({
+      host: DB_HOST,
+      port: +DB_PORT,
+      user: DB_USER,
+      password: DB_PASSWORD,
+      database: DB_NAME,
+    });
 
-  await conn.end();
+    const [rows] = await conn.query('SELECT * FROM sample');
+    console.log('🗒️ Sample 테이블 내용:');
+    rows.forEach(({ id, name }) => {
+      console.log(`  • [${id}] ${name}`);
+    });
+  } catch (err) {
+    console.error('❌ DB 조회 중 에러 발생:', err);
+    process.exit(1);
+  } finally {
+    if (conn) await conn.end();
+  }
 }
 
-main().catch(err => {
-  console.error('❌ Error reading from DB:', err);
-  process.exit(1);
-});
+main();
