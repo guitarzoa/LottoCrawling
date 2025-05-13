@@ -44,8 +44,14 @@ jobs:
       - name: Install dependencies
         run: npm install mysql2
 
-      - name: Fetch last lotto round & save JSON
-        run: node page/fetch-last-game.js
+      - name: Run DB reader & save JSON
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3800
+          DB_USER: test
+          DB_PASSWORD: pwtest
+          DB_NAME: test
+        run: node page/read-db.js
 
       - name: Commit results.json back to repo
         env:
