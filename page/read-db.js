@@ -1,5 +1,7 @@
 // page/read-db.js
 const mysql = require('mysql2/promise');
+const fs = require('fs');
+const path = require('path');
 
 async function main() {
   const {
@@ -20,11 +22,13 @@ async function main() {
       database: DB_NAME,
     });
 
+    // sample 테이블의 모든 행 조회
     const [rows] = await conn.query('SELECT * FROM sample');
-    console.log('🗒️ Sample 테이블 내용:');
-    rows.forEach(({ id, name }) => {
-      console.log(`  • [${id}] ${name}`);
-    });
+
+    // JSON 파일로 저장
+    const outPath = path.resolve(__dirname, '../results.json');
+    fs.writeFileSync(outPath, JSON.stringify(rows, null, 2), 'utf-8');
+    console.log(`✅ Query result saved to ${outPath}`);
   } catch (err) {
     console.error('❌ DB 조회 중 에러 발생:', err);
     process.exit(1);
