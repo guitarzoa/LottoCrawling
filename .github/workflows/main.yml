@@ -21,7 +21,7 @@ jobs:
         uses: mirromutth/mysql-action@v1.1
         with:
           'host port': 3800               # (키에 공백이 있으므로 따옴표로 감싸야 합니다)
-          'container port': 3307
+          'container port': 3306
           'character set server': utf8
           'collation server': utf8_general_ci
           'mysql version': 8.0
@@ -31,8 +31,13 @@ jobs:
           'mysql password': pwtest
 
       # 4. DB 접속 확인 (옵션)
-      - name: Verify MySQL connection
+      - name: Wait for MySQL to be ready
         run: |
-          mysql --host=127.0.0.1 --port=3800 \
-            --user=test --password=pwtest \
-            -e "SHOW DATABASES;"
+          until mysqladmin ping \
+            --host=127.0.0.1 --port=3800 \
+            --user=root --password="pwtest" --silent; do
+            echo "Waiting for MySQL..."
+            sleep 1
+          done
+
+
