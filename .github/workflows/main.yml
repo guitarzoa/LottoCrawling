@@ -13,6 +13,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
+          token: ${{ secrets.PAT }}    # <-- PAT 사용
           fetch-depth: 0            # 전체 히스토리 가져와야 커밋 푸시 시 충돌 방지
           persist-credentials: true # GITHUB_TOKEN으로 푸시 허용
 
@@ -78,16 +79,16 @@ jobs:
         run: node page/read-db.js
 
       - name: Commit results.json back to repo
+        env:
+            PAT: ${{ secrets.PAT }}
         run: |
-          # Git 사용자 정보 설정
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-        
-          # 변경사항이 있을 때만 커밋 & 푸시
           git add results.json
           if ! git diff --cached --quiet; then
             git commit -m "chore: update results.json (자동 생성)"
-            git push origin HEAD:main
+            # HTTPS에 PAT 포함해서 푸시
+            git push https://x-access-token:${PAT}@github.com/${{ github.repository }}.git HEAD:main
           else
             echo "No changes to commit"
           fi
