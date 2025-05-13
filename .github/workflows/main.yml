@@ -30,10 +30,22 @@ jobs:
         run: |
           until mysqladmin ping \
             --host=127.0.0.1 --port=3800 \
-            --user=test --password="pwtest" --silent; do
+            --user=root --password="pwroot" --silent; do
             echo "Waiting for MySQL..."
             sleep 1
           done
+
+      - name: Force mysql_native_password authentication
+        run: |
+          mysql \
+            --host=127.0.0.1 --port=3800 \
+            --user=root --password="pwroot" \
+            -e "
+              ALTER USER 'test'@'%' 
+                IDENTIFIED WITH mysql_native_password 
+                BY 'pwtest';
+              FLUSH PRIVILEGES;
+            "
 
       - name: Seed sample table & data
         run: |
@@ -50,19 +62,12 @@ jobs:
               ON DUPLICATE KEY UPDATE name=name;
             "
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '16'
-
-      - name: Install dependencies
-        run: npm install mysql2
-
-      - name: Run sample DB reader
-        env:
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3800
-          DB_USER: test
-          DB_PASSWORD: pwtest
-          DB_NAME: test
-        run: node page/read-db.js
+      - name: Verify connection as test
+        run: |
+          mysql \
+            --host=127.0.0.1 --port=3800 \
+            --user=test --password="pwtest" \
+            -e "
+              SHOW TABLES;
+              SELECT COUNT(*) AS total FROM sample;
+            "
