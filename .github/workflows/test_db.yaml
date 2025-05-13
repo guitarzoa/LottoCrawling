@@ -63,7 +63,7 @@ jobs:
           path: dump.sql
 
   app:
-    name: App: Restore DB & Run Scripts
+    name: Restore DB & Run Scripts
     needs: db
     runs-on: ubuntu-latest
 
@@ -121,9 +121,6 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_NAME: test
         run: node page/read-db.js
-
-      - name: Fetch last lotto round & save JSON
-        run: node page/fetch-last-game.js
 
       - name: Commit JSON files back to repo
         env:
