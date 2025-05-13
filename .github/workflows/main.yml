@@ -73,3 +73,18 @@ jobs:
           DB_PASSWORD: pwtest
           DB_NAME: test
         run: node page/read-db.js
+
+      - name: Commit results.json back to repo
+        run: |
+          # Git 사용자 정보 설정
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+          # 변경사항이 있을 때만 커밋 & 푸시
+          git add results.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update results.json (자동 생성)"
+            git push origin HEAD:main
+          else
+            echo "No changes to commit"
+          fi
