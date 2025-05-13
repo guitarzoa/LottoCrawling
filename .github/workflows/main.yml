@@ -2,7 +2,8 @@ name: CI with MySQL Service
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
