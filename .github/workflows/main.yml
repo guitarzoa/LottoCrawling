@@ -26,13 +26,13 @@ jobs:
           'collation server': utf8_general_ci
           'mysql version': 8.0
           'mysql database': test
-          'mysql root password': ${{ secrets.PWROOT }}   # secrets 네임스페이스 사용
+          'mysql root password': pwroot   # secrets 네임스페이스 사용
           'mysql user': test
-          'mysql password': ${{ secrets.PWTEST }}
+          'mysql password': pwtest
 
       # 4. DB 접속 확인 (옵션)
       - name: Verify MySQL connection
         run: |
           mysql --host=127.0.0.1 --port=3800 \
-            --user=test --password=${{ secrets.PWTEST }} \
+            --user=test --password=pwtest \
             -e "SHOW DATABASES;"
