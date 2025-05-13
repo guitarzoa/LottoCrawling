@@ -1,4 +1,4 @@
-name: CI with MySQL Service
+name: CI with Custom MySQL
 
 on:
   push:
@@ -9,48 +9,40 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    services:
-      mysql:
-        image: mysql:8.0
-        command: ["--default-authentication-plugin=mysql_native_password"]
-        env:
-          MYSQL_DATABASE: test
-          MYSQL_ROOT_PASSWORD: pwroot
-          MYSQL_USER: test
-          MYSQL_PASSWORD: pwtest
-        ports:
-          - 3800:3306
-        options: >-
-          --health-cmd="mysqladmin ping --silent"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Start MySQL container
+        run: |
+          docker run -d \
+            --name mysql-test \
+            -e MYSQL_DATABASE=test \
+            -e MYSQL_ROOT_PASSWORD=pwroot \
+            -e MYSQL_USER=test \
+            -e MYSQL_PASSWORD=pwtest \
+            -p 3800:3306 \
+            mysql:8.0 \
+            --default-authentication-plugin=mysql_native_password
       - name: Wait for MySQL to be ready
         run: |
-          until mysqladmin ping \
-            --host=127.0.0.1 --port=3800 \
-            --user=root --password="pwroot" --silent; do
-            echo "Waiting for MySQL..."
+          until docker exec mysql-test \
+            mysqladmin ping -h127.0.0.1 \
+            --silent --user=root --password=pwroot; do
             sleep 1
           done
 
       - name: Seed sample table & data
         run: |
-          mysql \
-            --host=127.0.0.1 --port=3800 \
-            --user=root --password="pwroot" \
+          docker exec mysql-test mysql \
+            --user=test --password=pwtest \
             -e "
               CREATE TABLE IF NOT EXISTS sample (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 name VARCHAR(50) NOT NULL
               );
               INSERT INTO sample (name) VALUES
-                ('Alice'), ('Bob'), ('Charlie')
+                ('Alice'),('Bob'),('Charlie')
               ON DUPLICATE KEY UPDATE name=name;
             "
 
