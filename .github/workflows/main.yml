@@ -22,15 +22,15 @@ jobs:
           'collation server': utf8_general_ci
           'mysql version': 8.0
           'mysql database': test
-          'mysql root password': ${{ secrets.PWROOT }}
+          'mysql root password': pwroot
           'mysql user': test
-          'mysql password': ${{ secrets.PWTEST }}
+          'mysql password': pwtest
 
       - name: Wait for MySQL to be ready
         run: |
           until mysqladmin ping \
             --host=127.0.0.1 --port=3800 \
-            --user=test --password="${{ secrets.PWTEST }}" --silent; do
+            --user=test --password="pwtest" --silent; do
             echo "Waiting for MySQL..."
             sleep 1
           done
@@ -39,7 +39,7 @@ jobs:
         run: |
           mysql \
             --host=127.0.0.1 --port=3800 \
-            --user=test --password="${{ secrets.PWTEST }}" \
+            --user=test --password="pwtest" \
             -e "
               CREATE TABLE IF NOT EXISTS sample (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -63,6 +63,6 @@ jobs:
           DB_HOST: 127.0.0.1
           DB_PORT: 3800
           DB_USER: test
-          DB_PASSWORD: ${{ secrets.PWTEST }}
+          DB_PASSWORD: pwtest
           DB_NAME: test
         run: node page/read-db.js
