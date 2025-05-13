@@ -35,7 +35,8 @@ jobs:
       - name: Seed sample table & data
         run: |
           docker exec mysql-test mysql \
-            --user=test --password=pwtest \
+            --user=root --password=pwroot \
+            --database=test \
             -e "
               CREATE TABLE IF NOT EXISTS sample (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -44,6 +45,16 @@ jobs:
               INSERT INTO sample (name) VALUES
                 ('Alice'),('Bob'),('Charlie')
               ON DUPLICATE KEY UPDATE name=name;
+            "
+
+      - name: Verify sample data
+        run: |
+          docker exec mysql-test mysql \
+            --user=test --password=pwtest \
+            --database=test \
+            -e "
+              SHOW TABLES;
+              SELECT COUNT(*) AS total FROM sample;
             "
 
       - name: Setup Node.js
