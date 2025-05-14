@@ -43,7 +43,7 @@ jobs:
           git add page/allLottoResults.json
           if ! git diff --cached --quiet; then
             git commit -m "chore: update page/allLottoResults.json (automated)"
-            git push https://x-access-token:${{ secrets.PAT }}@github.com/page/${{ github.repository }}.git HEAD:main
+            git push https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}.git HEAD:main
           else
             echo "No changes to commit"
           fi
