@@ -36,7 +36,6 @@ class Program
             if (meta == null)
             {
                 Console.Error.WriteLine("❌ meta#desc[name='description'] not found.");
-                PauseBeforeExit(); return 1;
             }
             string content = meta.GetAttributeValue("content", string.Empty);
             int start = content.IndexOf(' ') + 1;
@@ -44,17 +43,15 @@ class Program
             if (start <= 0 || end <= start)
             {
                 Console.Error.WriteLine("❌ Failed to parse lastGame from description content.");
-                PauseBeforeExit(); return 1;
             }
             if (!int.TryParse(content[start..end], out int lastGame))
             {
                 Console.Error.WriteLine($"❌ Invalid number '{content[start..end]}'");
-                PauseBeforeExit(); return 1;
             }
             Console.WriteLine($"Latest draw (lastGame): {lastGame}");
 
             // 2. Prepare existing results and determine resume point
-            JsonArray results = new JsonArray();
+            JsonArray results = null;
             int startDrwNo = 1;
             try
             {
@@ -73,55 +70,55 @@ class Program
             }
             catch { /* ignore remote errors */ }
 
-            if (startDrwNo > lastGame)
-            {
-                Console.WriteLine($"No new draws to fetch. Already fetched up to {lastGame}.");
-                PauseBeforeExit(); return 0;
-            }
 
             // 3. Fetch remaining draws
-            for (int drwNo = startDrwNo; drwNo <= lastGame; drwNo++)
+            if (results != null)
             {
-                string apiUrl = $"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={drwNo}";
-                try
+                for (int drwNo = startDrwNo; drwNo <= lastGame; drwNo++)
                 {
-                    // Ensure UTF8 decoding
-                    using var resp = await httpClient.GetAsync(apiUrl);
-                    var bytes = await resp.Content.ReadAsByteArrayAsync();
-                    string json = Encoding.UTF8.GetString(bytes);
-                    if (JsonNode.Parse(json) is JsonNode node)
+                    string apiUrl = $"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={drwNo}";
+                    try
                     {
-                        results.Add(node);
-                        Console.WriteLine($"Fetched draw {drwNo}/{lastGame}");
+                        // Ensure UTF8 decoding
+                        using var resp = await httpClient.GetAsync(apiUrl);
+                        var bytes = await resp.Content.ReadAsByteArrayAsync();
+                        string json = Encoding.UTF8.GetString(bytes);
+                        if (JsonNode.Parse(json) is JsonNode node)
+                        {
+                            results.Add(node);
+                            Console.WriteLine($"Fetched draw {drwNo}/{lastGame}");
+                        }
                     }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"⚠️ Error fetching draw {drwNo}: {ex.Message}");
+                    }
+                    await Task.Delay(50);
                 }
-                catch (Exception ex)
+
+                // 4. Write all results back
+                string combined = results.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+                await File.WriteAllTextAsync(outFile, combined, Encoding.UTF8);
+
+                if (startDrwNo > lastGame)
                 {
-                    Console.Error.WriteLine($"⚠️ Error fetching draw {drwNo}: {ex.Message}");
+                    Console.WriteLine($"No new draws. Up to {lastGame}.");
                 }
-                await Task.Delay(50);
+                else
+                {
+                    Console.WriteLine($"{outFile} updated");
+                }
+
             }
 
-            // 4. Write all results back
-            string combined = results.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-            await File.WriteAllTextAsync(outFile, combined, Encoding.UTF8);
-            Console.WriteLine($"✅ {outFile} updated with {results.Count} entries.");
-            PauseBeforeExit(); return 0;
+            return 0;
+
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"❌ Unexpected error: {ex.Message}");
-            PauseBeforeExit(); return 1;
+            return 1;
         }
     }
 
-    /// <summary>
-    /// Prevent console from closing immediately.
-    /// </summary>
-    static void PauseBeforeExit()
-    {
-        Console.WriteLine();
-        Console.WriteLine("Press any key to exit...");
-        Console.ReadKey(intercept: true);
-    }
 }
