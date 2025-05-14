@@ -1,4 +1,4 @@
-﻿
+
 // Program.cs
 using System;
 using System.IO;
@@ -18,6 +18,7 @@ class Program
 
         // Lotto result page URL
         const string mainUrl = "https://www.dhlottery.co.kr/gameResult.do?method=byWin";
+        const string remoteResultsUrl = "https://guitarzoa.github.io/TEST/page/allLottoResults.json";
         const string outFile = "allLottoResults.json";
 
         using var httpClient = new HttpClient();
@@ -53,20 +54,24 @@ class Program
             Console.WriteLine($"Latest draw (lastGame): {lastGame}");
 
             // 2. Prepare existing results and determine resume point
-            JsonArray results;
+            JsonArray results = new JsonArray();
             int startDrwNo = 1;
-            if (File.Exists(outFile))
+            try
             {
-                string existingJson = await File.ReadAllTextAsync(outFile, Encoding.UTF8);
-                if (JsonNode.Parse(existingJson) is JsonArray existingArray)
+                using var resp = await httpClient.GetAsync(remoteResultsUrl);
+                if (resp.IsSuccessStatusCode)
                 {
-                    results = existingArray;
-                    int maxDrw = existingArray.Select(o => o?["drwNo"].GetValue<int>() ?? 0).Max();
-                    startDrwNo = maxDrw + 1;
+                    var jsonBytes = await resp.Content.ReadAsByteArrayAsync();
+                    string remoteJson = Encoding.UTF8.GetString(jsonBytes).TrimStart('\uFEFF');
+                    if (JsonNode.Parse(remoteJson) is JsonArray remoteArr)
+                    {
+                        results = new JsonArray(remoteArr);
+                        startDrwNo = remoteArr.Select(n => n?["drwNo"]?.GetValue<int>() ?? 0).DefaultIfEmpty(0).Max() + 1;
+                        Console.WriteLine($"Resuming from remote, next draw: {startDrwNo}");
+                    }
                 }
-                else results = new JsonArray();
             }
-            else results = new JsonArray();
+            catch { /* ignore remote errors */ }
 
             if (startDrwNo > lastGame)
             {
