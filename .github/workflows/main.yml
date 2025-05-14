@@ -30,15 +30,20 @@ jobs:
       - name: Run fetcher
         run: |
           dotnet run --project Crawling.csproj --configuration Release
+          
+          # page 폴더가 없다면 생성
+          mkdir -p page
+          # 루트에 있는 JSON 파일을 page/로 복사(또는 이동)
+          mv allLottoResults.json page/allLottoResults.json
 
       - name: Commit generated JSON
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add allLottoResults.json
+          git add page/allLottoResults.json
           if ! git diff --cached --quiet; then
             git commit -m "chore: update page/allLottoResults.json (automated)"
-            git push https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}.git HEAD:main
+            git push https://x-access-token:${{ secrets.PAT }}@github.com/page/${{ github.repository }}.git HEAD:main
           else
             echo "No changes to commit"
           fi
