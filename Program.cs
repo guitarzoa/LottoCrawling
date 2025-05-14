@@ -62,7 +62,7 @@ class Program
                     string remoteJson = Encoding.UTF8.GetString(jsonBytes).TrimStart('\uFEFF');
                     if (JsonNode.Parse(remoteJson) is JsonArray remoteArr)
                     {
-                        results = new JsonArray(remoteArr);
+                        results = remoteArr;
                         startDrwNo = remoteArr.Select(n => n?["drwNo"]?.GetValue<int>() ?? 0).DefaultIfEmpty(0).Max() + 1;
                         Console.WriteLine($"Resuming from remote, next draw: {startDrwNo}");
                     }
