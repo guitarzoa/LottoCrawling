@@ -3,9 +3,6 @@ name: Fetch Lotto Results
 on:
   schedule:
     - cron: '0 13 * * 6' # 한국 시간으로 밤 10시 (22시) 토요일에 실행
-    
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
