@@ -18,7 +18,7 @@ class Program
 
         // Lotto result page URL
         const string mainUrl = "https://www.dhlottery.co.kr/gameResult.do?method=byWin";
-        const string remoteResultsUrl = "https://guitarzoa.github.io/TEST/page/allLottoResults.json";
+        const string remoteResultsUrl = "https://guitarzoa.github.io/LottoCrawling/page/allLottoResults.json";
         const string outFile = "allLottoResults.json";
 
         using var httpClient = new HttpClient();
