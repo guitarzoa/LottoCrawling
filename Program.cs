@@ -36,6 +36,7 @@ class Program
             if (meta == null)
             {
                 Console.Error.WriteLine("❌ meta#desc[name='description'] not found.");
+                return 1;  // Exit early to prevent null reference
             }
             string content = meta.GetAttributeValue("content", string.Empty);
             int start = content.IndexOf(' ') + 1;
@@ -51,7 +52,7 @@ class Program
             Console.WriteLine($"Latest draw (lastGame): {lastGame}");
 
             // 2. Prepare existing results and determine resume point
-            JsonArray results = null;
+            JsonArray results = new JsonArray();  // Initialize instead of null
             int startDrwNo = 1;
             try
             {
