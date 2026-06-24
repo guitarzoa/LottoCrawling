@@ -557,12 +557,17 @@ def format_history(product: str, items: list[dict[str, Any]]) -> str:
         return f"{title} 최근 구매/예약 내역이 없습니다."
 
     lines = [f"{title} 최근 구매/예약 내역"]
-    for item in items[:10]:
-        round_no = item.get("ltEpsdView") or item.get("ltEpsd") or "?"
-        date = item.get("eltOrdrDt") or item.get("ntslDt") or "-"
-        amount = item.get("ntslAmt") or item.get("ltWnAmt") or "0"
-        status = item.get("przwnerYn") or item.get("winYn") or item.get("pymntYn") or "-"
-        lines.append(f"- {round_no}회 / {date} / 금액 {amount} / 상태 {status}")
+    grouped: dict[tuple[str, str, str, str, str], int] = {}
+    for item in items:
+        key = history_summary_key(item)
+        grouped[key] = grouped.get(key, 0) + 1
+
+    for (round_no, date, purchase_amount, winning_amount, status), count in list(grouped.items())[:10]:
+        count_text = f" / {count}건" if count > 1 else ""
+        status_text = f" / {status}" if status else ""
+        lines.append(
+            f"- {round_no}회 / {date}{count_text} / 구매금액 {purchase_amount} / 당첨금 {winning_amount}{status_text}"
+        )
     return "\n".join(lines)
 
 
@@ -579,6 +584,65 @@ def format_winning(product: str, items: list[dict[str, Any]]) -> str:
         amount = int(str(item.get("ltWnAmt") or "0").replace(",", ""))
         lines.append(f"- {round_no}회 / {date} / {amount:,}원 당첨")
     return "\n".join(lines)
+
+
+def history_summary_key(item: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    round_no = str(item.get("ltEpsdView") or item.get("ltEpsd") or "?").replace("회", "")
+    date = str(item.get("eltOrdrDt") or item.get("ntslDt") or item.get("epsdRflDt") or "-")
+    purchase_amount = format_optional_money(first_present(item, PURCHASE_AMOUNT_FIELDS))
+    winning_amount = format_money(item.get("ltWnAmt") or 0)
+    status = history_status(item)
+    return round_no, date, purchase_amount, winning_amount, status
+
+
+PURCHASE_AMOUNT_FIELDS = (
+    "ntslAmt",
+    "buyAmt",
+    "pchsAmt",
+    "payAmt",
+    "setleAmt",
+    "stlmAmt",
+    "ordrAmt",
+    "totPymntAmt",
+    "pymntAmt",
+)
+
+
+def first_present(item: dict[str, Any], fields: Iterable[str]) -> Any:
+    for field in fields:
+        value = item.get(field)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def format_optional_money(value: Any) -> str:
+    if value in (None, ""):
+        return "확인 불가"
+    return format_money(value)
+
+
+def format_money(value: Any) -> str:
+    try:
+        amount = int(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{amount:,}원"
+
+
+def history_status(item: dict[str, Any]) -> str:
+    win_flag = item.get("przwnerYn") or item.get("winYn")
+    if win_flag == "Y":
+        return "당첨"
+    if win_flag == "N":
+        return "미당첨"
+
+    payment_flag = item.get("pymntYn")
+    if payment_flag == "Y":
+        return "지급완료"
+    if payment_flag == "N":
+        return "미지급"
+    return ""
 
 
 def require_enabled(secret_name: str) -> bool:
@@ -619,6 +683,9 @@ def run_history_or_check(args: argparse.Namespace, *, winning_only: bool) -> int
     messages = []
     for product in products_for(args.product):
         items = ledger.recent(product, days=args.days, limit=args.limit)
+        if args.raw:
+            messages.append(f"{product} raw ledger\n```json\n{json.dumps(items, ensure_ascii=False, indent=2)}\n```")
+            continue
         messages.append(format_winning(product, items) if winning_only else format_history(product, items))
     return emit_messages(messages, args.notify)
 
@@ -647,12 +714,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     history.add_argument("--days", type=int, default=14)
     history.add_argument("--limit", type=int, default=10)
     history.add_argument("--notify", action="store_true")
+    history.add_argument("--raw", action="store_true")
 
     check = subparsers.add_parser("check", help="Send recent winning notifications.")
     check.add_argument("--product", choices=["lotto", "pension", "all"], default="all")
-    check.add_argument("--days", type=int, default=30)
+    check.add_argument("--days", type=int, default=14)
     check.add_argument("--limit", type=int, default=10)
     check.add_argument("--notify", action="store_true")
+    check.add_argument("--raw", action="store_true")
 
     return parser.parse_args(argv)
 

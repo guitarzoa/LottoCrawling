@@ -35,7 +35,21 @@ class LotteryBotFormattingTests(unittest.TestCase):
         ]
 
         self.assertIn("최근 구매/예약 내역", format_history("lotto", items))
+        self.assertIn("구매금액 5,000원", format_history("lotto", items))
+        self.assertIn("구매금액 확인 불가", format_history("lotto", items))
         self.assertIn("5,000원 당첨", format_winning("lotto", items))
+
+    def test_groups_duplicate_history_rows(self):
+        items = [
+            {"ltEpsdView": "321", "eltOrdrDt": "20260618", "ltWnAmt": "0"},
+            {"ltEpsdView": "321", "eltOrdrDt": "20260618", "ltWnAmt": "0"},
+            {"ltEpsdView": "321", "eltOrdrDt": "20260618", "ltWnAmt": "0"},
+        ]
+
+        message = format_history("pension", items)
+
+        self.assertIn("321회 / 20260618 / 3건", message)
+        self.assertIn("당첨금 0원", message)
 
     def test_formats_raw_lotto_games(self):
         self.assertEqual(format_lotto_games(["A|1|12|23|34|40|45|3"]), "A: 01, 12, 23, 34, 40, 45")
