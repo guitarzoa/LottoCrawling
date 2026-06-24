@@ -19,6 +19,8 @@ from bs4 import BeautifulSoup
 from discord_notify import send_discord_message
 
 
+BASE_URL = "https://www.dhlottery.co.kr"
+LOGIN_PAGE_URL = f"{BASE_URL}/login"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
@@ -60,8 +62,8 @@ class DhlotterySession:
         )
 
     def login(self, credentials: LotteryCredentials) -> None:
-        self.get("https://www.dhlottery.co.kr/")
-        self.get("https://www.dhlottery.co.kr/user.do?method=login", headers=self._login_page_headers())
+        self._ensure_site_page(self.get(f"{BASE_URL}/"), "main page")
+        self._ensure_site_page(self.get(LOGIN_PAGE_URL, headers=self._login_page_headers()), "login page")
 
         modulus, exponent = self._fetch_rsa_key()
         payload = {
@@ -73,16 +75,16 @@ class DhlotterySession:
         headers.update(
             {
                 "Content-Type": "application/x-www-form-urlencoded",
-                "Origin": "https://www.dhlottery.co.kr",
-                "Referer": "https://www.dhlottery.co.kr/user.do?method=login",
+                "Origin": BASE_URL,
+                "Referer": LOGIN_PAGE_URL,
             }
         )
-        self.post("https://www.dhlottery.co.kr/login/securityLoginCheck.do", headers=headers, data=payload)
-        self.get("https://www.dhlottery.co.kr/main", headers=self._login_page_headers())
+        self.post(f"{BASE_URL}/login/securityLoginCheck.do", headers=headers, data=payload)
+        self._verify_login()
 
     def get_balance(self) -> int | None:
         headers = self.ajax_headers("/mypage/home")
-        response = self.get("https://www.dhlottery.co.kr/mypage/selectUserMndp.do", headers=headers)
+        response = self.get(f"{BASE_URL}/mypage/selectUserMndp.do", headers=headers)
         try:
             payload = response.json()
         except ValueError:
@@ -103,7 +105,7 @@ class DhlotterySession:
             "X-Requested-With": "XMLHttpRequest",
             "AJAX": "true",
             "requestMenuUri": request_menu_uri,
-            "Referer": referer or f"https://www.dhlottery.co.kr{request_menu_uri}",
+            "Referer": referer or f"{BASE_URL}{request_menu_uri}",
         }
 
     def current_session_key(self) -> str:
@@ -133,14 +135,35 @@ class DhlotterySession:
         raise LotteryBotError(f"Request failed after {self.retries} attempts: {url}") from last_error
 
     def _fetch_rsa_key(self) -> tuple[str, str]:
-        headers = self.ajax_headers("/user.do", "https://www.dhlottery.co.kr/user.do?method=login")
-        response = self.get("https://www.dhlottery.co.kr/login/selectRsaModulus.do", headers=headers)
-        payload = response.json()
+        headers = self.ajax_headers("/login", LOGIN_PAGE_URL)
+        response = self.get(f"{BASE_URL}/login/selectRsaModulus.do", headers=headers)
+        payload = parse_json_response(response, context="login RSA key")
         data = payload.get("data", payload)
         try:
             return data["rsaModulus"], data["publicExponent"]
         except KeyError as exc:
-            raise LotteryBotError("Could not load login RSA key from dhlottery.") from exc
+            raise LotteryBotError(f"Could not load login RSA key from dhlottery: {data}") from exc
+
+    def _verify_login(self) -> None:
+        response = self.get(f"{BASE_URL}/mypage/home", headers=self._login_page_headers())
+        self._ensure_site_page(response, "login verification")
+        if is_login_page(response) or response.url.rstrip("/").endswith("/login"):
+            raise LotteryBotError("Login did not succeed. Check DHL_USER_ID/DHL_PASSWORD.")
+
+    @staticmethod
+    def _ensure_site_page(response: requests.Response, context: str) -> None:
+        text = response.text[:2000]
+        markers = [
+            "서비스 접속이 차단",
+            "서비스 접속이 불가",
+            "서비스 접근 대기",
+            "error.html",
+        ]
+        if response.url.endswith("/error.html") or any(marker in text for marker in markers):
+            raise LotteryBotError(
+                f"Dhlottery {context} is not accessible from this environment. "
+                f"url={response.url}, status={response.status_code}, snippet={compact_snippet(text)}"
+            )
 
     @staticmethod
     def _rsa_encrypt(text: str, modulus: str, exponent: str) -> str:
@@ -157,8 +180,8 @@ class DhlotterySession:
             "User-Agent": USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Content-Type": "application/x-www-form-urlencoded",
-            "Referer": "https://www.dhlottery.co.kr/",
-            "Origin": "https://www.dhlottery.co.kr",
+            "Referer": BASE_URL + "/",
+            "Origin": BASE_URL,
         }
 
 
@@ -305,7 +328,7 @@ class Pension720Buyer:
 
     def _round(self) -> str:
         try:
-            response = self.client.get("https://www.dhlottery.co.kr/common.do?method=main", headers={"User-Agent": USER_AGENT})
+            response = self.client.get(f"{BASE_URL}/common.do?method=main", headers={"User-Agent": USER_AGENT})
             soup = BeautifulSoup(response.text, "html.parser")
             found = soup.find("strong", id="drwNo720")
             if found and found.get_text(strip=True).isdigit():
@@ -383,11 +406,11 @@ class LotteryLedger:
     def recent(self, product: str, days: int = 14, limit: int = 10) -> list[dict[str, Any]]:
         params = search_params(product, days, limit)
         response = self.client.get(
-            "https://www.dhlottery.co.kr/mypage/selectMyLotteryledger.do",
+            f"{BASE_URL}/mypage/selectMyLotteryledger.do",
             params=params,
             headers=self.client.ajax_headers("/mypage/mylotteryledger"),
         )
-        payload = parse_json_response(response)
+        payload = parse_json_response(response, context=f"{product} ledger")
         data = payload.get("data", {})
         items = data.get("list", []) if isinstance(data, dict) else []
         return items if isinstance(items, list) else []
@@ -425,14 +448,33 @@ def validate_count(count: int) -> None:
         raise LotteryBotError("Purchase count must be between 1 and 5.")
 
 
-def parse_json_response(response: requests.Response) -> dict[str, Any]:
+def parse_json_response(response: requests.Response, context: str = "response") -> dict[str, Any]:
     if response.encoding in {None, "ISO-8859-1"}:
         response.encoding = "utf-8"
     try:
         return response.json()
-    except ValueError:
+    except ValueError as first_error:
         response.encoding = "euc-kr"
-        return json.loads(response.text)
+        text = response.text
+        try:
+            return json.loads(text)
+        except ValueError as second_error:
+            content_type = response.headers.get("content-type", "")
+            raise LotteryBotError(
+                f"Dhlottery {context} did not return JSON. "
+                f"url={response.url}, status={response.status_code}, "
+                f"content_type={content_type}, snippet={compact_snippet(text)}"
+            ) from second_error or first_error
+
+
+def is_login_page(response: requests.Response) -> bool:
+    text = response.text[:5000]
+    return "로그인" in text and ("아이디 저장" in text or "로그인을 해주세요" in text)
+
+
+def compact_snippet(text: str, limit: int = 240) -> str:
+    snippet = re.sub(r"\s+", " ", text or "").strip()
+    return snippet[:limit] + ("..." if len(snippet) > limit else "")
 
 
 def quote_unquoted_result_message(text: str) -> str:
@@ -608,7 +650,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
     check = subparsers.add_parser("check", help="Send recent winning notifications.")
     check.add_argument("--product", choices=["lotto", "pension", "all"], default="all")
-    check.add_argument("--days", type=int, default=14)
+    check.add_argument("--days", type=int, default=30)
     check.add_argument("--limit", type=int, default=10)
     check.add_argument("--notify", action="store_true")
 
