@@ -2,7 +2,8 @@ name: Buy Lottery
 
 on:
   schedule:
-    - cron: "0 10 * * 1"
+    - cron: "30 19 * * 6"
+      timezone: "Asia/Seoul"
   workflow_dispatch:
     inputs:
       product:
