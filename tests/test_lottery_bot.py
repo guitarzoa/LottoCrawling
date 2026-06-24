@@ -8,6 +8,7 @@ from lottery_bot import (
     format_lotto_purchase,
     format_pension_tickets,
     format_winning,
+    parse_args,
     parse_pension_ticket_number,
 )
 
@@ -102,6 +103,20 @@ class LotteryBotFormattingTests(unittest.TestCase):
         )
 
         self.assertIn("  · 당첨번호: 12, 13, 29, 34, 37, 42 + 보너스 16", message)
+
+    def test_history_winning_only_replaces_check_command(self):
+        args = parse_args(["history", "--product", "all", "--winning-only", "--compare"])
+
+        self.assertEqual(args.command, "history")
+        self.assertTrue(args.winning_only)
+        self.assertTrue(args.compare)
+
+    def test_check_command_remains_compatible_alias(self):
+        args = parse_args(["check", "--product", "lotto", "--compare"])
+
+        self.assertEqual(args.command, "check")
+        self.assertTrue(args.winning_only)
+        self.assertTrue(args.compare)
 
 
 if __name__ == "__main__":

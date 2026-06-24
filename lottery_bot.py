@@ -971,7 +971,8 @@ def run_buy(args: argparse.Namespace) -> int:
     return emit_messages(messages, args.notify)
 
 
-def run_history_or_check(args: argparse.Namespace, *, winning_only: bool) -> int:
+def run_history(args: argparse.Namespace) -> int:
+    winning_only = bool(getattr(args, "winning_only", False))
     client, _ = build_client_and_login()
     ledger = LotteryLedger(client)
     messages = []
@@ -1005,23 +1006,25 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     buy.add_argument("--dry-run", action="store_true")
     buy.add_argument("--require-enabled", action="store_true")
 
-    history = subparsers.add_parser("history", help="Send recent purchase/reservation history.")
-    history.add_argument("--product", choices=["lotto", "pension", "all"], default="all")
-    history.add_argument("--days", type=int, default=14)
-    history.add_argument("--limit", type=int, default=10)
-    history.add_argument("--notify", action="store_true")
-    history.add_argument("--raw", action="store_true")
-    history.add_argument("--compare", action="store_true", help="Compare purchased numbers with winning numbers.")
+    history = subparsers.add_parser("history", help="Send recent purchase/reservation history or winning notifications.")
+    add_history_arguments(history)
+    history.add_argument("--winning-only", action="store_true", help="Only send entries with winning amounts.")
+    history.set_defaults(winning_only=False)
 
-    check = subparsers.add_parser("check", help="Send recent winning notifications.")
-    check.add_argument("--product", choices=["lotto", "pension", "all"], default="all")
-    check.add_argument("--days", type=int, default=14)
-    check.add_argument("--limit", type=int, default=10)
-    check.add_argument("--notify", action="store_true")
-    check.add_argument("--raw", action="store_true")
-    check.add_argument("--compare", action="store_true", help="Load purchase details before checking winnings.")
+    check = subparsers.add_parser("check", help="Compatibility alias for history --winning-only.")
+    add_history_arguments(check)
+    check.set_defaults(winning_only=True)
 
     return parser.parse_args(argv)
+
+
+def add_history_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--product", choices=["lotto", "pension", "all"], default="all")
+    parser.add_argument("--days", type=int, default=14)
+    parser.add_argument("--limit", type=int, default=10)
+    parser.add_argument("--notify", action="store_true")
+    parser.add_argument("--raw", action="store_true")
+    parser.add_argument("--compare", action="store_true", help="Compare purchased numbers with winning numbers.")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1029,10 +1032,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "buy":
             return run_buy(args)
-        if args.command == "history":
-            return run_history_or_check(args, winning_only=False)
-        if args.command == "check":
-            return run_history_or_check(args, winning_only=True)
+        if args.command in {"history", "check"}:
+            return run_history(args)
         raise LotteryBotError(f"Unsupported command: {args.command}")
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

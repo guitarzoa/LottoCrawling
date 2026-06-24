@@ -35,4 +35,4 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           PRODUCT="${{ github.event.inputs.product || 'all' }}"
-          python lottery_bot.py check --product "$PRODUCT" --notify
+          python lottery_bot.py history --product "$PRODUCT" --winning-only --compare --notify

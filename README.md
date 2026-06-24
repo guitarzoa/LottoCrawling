@@ -78,8 +78,7 @@ Manual commands:
 python lottery_bot.py buy --product all --count 5 --notify
 python lottery_bot.py history --product all --notify
 python lottery_bot.py history --product all --compare
-python lottery_bot.py check --product all --notify
-python lottery_bot.py check --product all --compare
+python lottery_bot.py history --product all --winning-only --compare --notify
 ```
 
 Scheduled workflows:
