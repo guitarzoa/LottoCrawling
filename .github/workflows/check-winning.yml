@@ -1,0 +1,39 @@
+name: Check Lottery Winning
+
+on:
+  schedule:
+    - cron: "0 13 * * 6"
+  workflow_dispatch:
+    inputs:
+      product:
+        description: "lotto, pension, or all"
+        required: true
+        default: "all"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Check winnings
+        env:
+          DHL_USER_ID: ${{ secrets.DHL_USER_ID }}
+          DHL_PASSWORD: ${{ secrets.DHL_PASSWORD }}
+          LOTTERY_CHECK_ENABLED: ${{ secrets.LOTTERY_CHECK_ENABLED }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          PRODUCT="${{ github.event.inputs.product || 'all' }}"
+          python lottery_bot.py check --product "$PRODUCT" --notify --require-enabled

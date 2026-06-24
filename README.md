@@ -46,3 +46,47 @@ DISCORD_CHANNEL_ID
 ```
 
 Alternatively, set `DISCORD_WEBHOOK_URL` instead of the bot token and channel ID.
+
+## Account Bot
+
+`lottery_bot.py` can log in to dhlottery, buy Lotto 6/45 and Pension 720+ automatically, send purchase notifications, show recent purchase/reservation history, and send winning notifications.
+
+Required secrets:
+
+```text
+DHL_USER_ID
+DHL_PASSWORD
+DISCORD_BOT_TOKEN
+DISCORD_CHANNEL_ID
+```
+
+Purchase workflows also require this explicit safety switch:
+
+```text
+LOTTERY_AUTO_BUY_ENABLED=true
+```
+
+Winning-check workflows require:
+
+```text
+LOTTERY_CHECK_ENABLED=true
+```
+
+Optional:
+
+```text
+LOTTO_BUY_COUNT=5
+```
+
+Manual commands:
+
+```bash
+python lottery_bot.py buy --product all --count 5 --notify
+python lottery_bot.py history --product all --notify
+python lottery_bot.py check --product all --notify
+```
+
+Scheduled workflows:
+
+- `.github/workflows/buy-lottery.yml`: every Monday at 19:00 KST
+- `.github/workflows/check-winning.yml`: every Saturday at 22:00 KST
