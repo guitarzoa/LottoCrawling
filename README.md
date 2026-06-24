@@ -34,4 +34,15 @@ python -m unittest
 
 ## GitHub Actions
 
-`.github/workflows/fetch-lotto.yml` runs every Saturday at 14:10 UTC, which is 23:10 KST, and commits `page/allLottoResults.json` when data changes.
+`.github/workflows/fetch-lotto.yml` runs every Saturday at 12:00 UTC, which is 21:00 KST, and commits `page/allLottoResults.json` when data changes.
+
+After the crawler finishes, the workflow can send the latest result to Discord in Korean.
+
+Required GitHub Actions secrets for bot-token delivery:
+
+```text
+DISCORD_BOT_TOKEN
+DISCORD_CHANNEL_ID
+```
+
+Alternatively, set `DISCORD_WEBHOOK_URL` instead of the bot token and channel ID.

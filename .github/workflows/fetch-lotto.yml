@@ -2,7 +2,7 @@ name: Fetch Lotto Results
 
 on:
   schedule:
-    - cron: "10 14 * * 6"
+    - cron: "0 12 * * 6"
   workflow_dispatch:
 
 permissions:
@@ -38,3 +38,10 @@ jobs:
           else
             echo "No changes to commit"
           fi
+
+      - name: Notify Discord
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python discord_notify.py --input page/allLottoResults.json
