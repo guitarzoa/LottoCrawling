@@ -415,6 +415,71 @@ class LotteryLedger:
         items = data.get("list", []) if isinstance(data, dict) else []
         return items if isinstance(items, list) else []
 
+    def enrich_history(self, product: str, items: list[dict[str, Any]], days: int = 14) -> list[dict[str, Any]]:
+        cache: dict[tuple[Any, ...], dict[str, Any]] = {}
+        enriched = []
+        params = search_params(product, days, max(len(items), 10))
+        for item in items:
+            key = (product, item.get("ntslOrdrNo"), item.get("ltEpsd"), item.get("gmInfo"))
+            if key not in cache:
+                cache[key] = self.detail_summary(product, item, params)
+            merged = dict(item)
+            merged.update(cache[key])
+            enriched.append(merged)
+        return enriched
+
+    def detail_summary(
+        self,
+        product: str,
+        item: dict[str, Any],
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            if product == "lotto":
+                detail = self._lotto_detail(item, params)
+                ticket = detail.get("ticket", {}) if isinstance(detail, dict) else {}
+                return {
+                    "_purchase_amount": ticket.get("ticket_amt"),
+                    "_detail_count": len(ticket.get("game_dtl") or []),
+                    "_win_total_amount": ticket.get("win_total_amt"),
+                }
+
+            detail = self._pension_detail(item)
+            rows = detail.get("list", []) if isinstance(detail, dict) else []
+            purchase_amount = sum(int(row.get("prchsAmt") or 0) for row in rows)
+            return {
+                "_purchase_amount": purchase_amount if rows else None,
+                "_detail_count": len(rows),
+                "_win_total_amount": sum(int(row.get("ltWnAmt") or 0) for row in rows),
+            }
+        except Exception as exc:
+            return {"_detail_error": f"{type(exc).__name__}: {exc}"}
+
+    def _lotto_detail(self, item: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+        response = self.client.get(
+            f"{BASE_URL}/mypage/lotto645TicketDetail.do",
+            params={
+                "ltGdsCd": item.get("ltGdsCd"),
+                "ltEpsd": item.get("ltEpsd"),
+                "barcd": item.get("gmInfo"),
+                "ntslOrdrNo": item.get("ntslOrdrNo"),
+                "srchStrDt": params["srchStrDt"],
+                "srchEndDt": params["srchEndDt"],
+            },
+            headers=self.client.ajax_headers("/mypage/mylotteryledger"),
+        )
+        payload = parse_json_response(response, context="lotto detail")
+        return payload.get("data", payload)
+
+    def _pension_detail(self, item: dict[str, Any]) -> dict[str, Any]:
+        response = self.client.get(
+            f"{BASE_URL}/mypage/lottery720select.do",
+            params={"ntslOrdrNo": item.get("ntslOrdrNo")},
+            headers=self.client.ajax_headers("/mypage/mylotteryledger"),
+        )
+        payload = parse_json_response(response, context="pension detail")
+        return payload.get("data", payload)
+
 
 def search_params(product: str, days: int, limit: int) -> dict[str, Any]:
     end = dt.date.today()
@@ -589,8 +654,8 @@ def format_winning(product: str, items: list[dict[str, Any]]) -> str:
 def history_summary_key(item: dict[str, Any]) -> tuple[str, str, str, str, str]:
     round_no = str(item.get("ltEpsdView") or item.get("ltEpsd") or "?").replace("회", "")
     date = str(item.get("eltOrdrDt") or item.get("ntslDt") or item.get("epsdRflDt") or "-")
-    purchase_amount = format_optional_money(first_present(item, PURCHASE_AMOUNT_FIELDS))
-    winning_amount = format_money(item.get("ltWnAmt") or 0)
+    purchase_amount = format_optional_money(item.get("_purchase_amount") or first_present(item, PURCHASE_AMOUNT_FIELDS))
+    winning_amount = history_winning_amount(item)
     status = history_status(item)
     return round_no, date, purchase_amount, winning_amount, status
 
@@ -630,7 +695,21 @@ def format_money(value: Any) -> str:
     return f"{amount:,}원"
 
 
+def history_winning_amount(item: dict[str, Any]) -> str:
+    status = str(item.get("ltWnResult") or "")
+    value = item.get("ltWnAmt")
+    if value in (None, "") and status == "미추첨":
+        return "미추첨"
+    if item.get("_win_total_amount") not in (None, ""):
+        value = item.get("_win_total_amount")
+    return format_money(value or 0)
+
+
 def history_status(item: dict[str, Any]) -> str:
+    result = item.get("ltWnResult")
+    if result:
+        return str(result)
+
     win_flag = item.get("przwnerYn") or item.get("winYn")
     if win_flag == "Y":
         return "당첨"
@@ -686,6 +765,8 @@ def run_history_or_check(args: argparse.Namespace, *, winning_only: bool) -> int
         if args.raw:
             messages.append(f"{product} raw ledger\n```json\n{json.dumps(items, ensure_ascii=False, indent=2)}\n```")
             continue
+        if not winning_only:
+            items = ledger.enrich_history(product, items, days=args.days)
         messages.append(format_winning(product, items) if winning_only else format_history(product, items))
     return emit_messages(messages, args.notify)
 
