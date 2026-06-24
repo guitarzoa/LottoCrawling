@@ -17,6 +17,13 @@ import requests
 from bs4 import BeautifulSoup
 
 from discord_notify import send_discord_message
+from lotto_predictor import (
+    LOTTO_HISTORY_PATH,
+    LOTTO_MODEL_METADATA_PATH,
+    LOTTO_MODEL_PATH,
+    build_lotto_purchase_plan,
+    format_planned_games,
+)
 
 
 BASE_URL = "https://www.dhlottery.co.kr"
@@ -83,19 +90,23 @@ class DhlotterySession:
         self._verify_login()
 
     def get_balance(self) -> int | None:
+        data = self.get_balance_detail()
+        if data.get("totalAmt") is not None:
+            return int(str(data["totalAmt"]).replace(",", ""))
+        return None
+
+    def get_balance_detail(self) -> dict[str, Any]:
         headers = self.ajax_headers("/mypage/home")
         response = self.get(f"{BASE_URL}/mypage/selectUserMndp.do", headers=headers)
         try:
             payload = response.json()
         except ValueError:
-            return None
+            return {}
 
         data = payload.get("data", payload)
         if isinstance(data, dict) and "userMndp" in data:
             data = data["userMndp"]
-        if isinstance(data, dict) and data.get("totalAmt") is not None:
-            return int(str(data["totalAmt"]).replace(",", ""))
-        return None
+        return data if isinstance(data, dict) else {}
 
     def ajax_headers(self, request_menu_uri: str, referer: str | None = None) -> dict[str, str]:
         return {
@@ -192,17 +203,34 @@ class Lotto645Buyer:
     def buy_auto(self, count: int) -> dict[str, Any]:
         validate_count(count)
         requirements = self._load_requirements()
+        games = [
+            {"genType": "0", "arrGameChoiceNum": None, "alpabet": slot}
+            for slot in SLOTS[:count]
+        ]
+        return self._execute_buy(requirements, games, count)
+
+    def buy_model_mix(
+        self,
+        history_path: Path = LOTTO_HISTORY_PATH,
+        model_path: Path = LOTTO_MODEL_PATH,
+        metadata_path: Path = LOTTO_MODEL_METADATA_PATH,
+    ) -> dict[str, Any]:
+        planned_games = build_lotto_purchase_plan(history_path, model_path, metadata_path)
+        requirements = self._load_requirements()
+        result = self._execute_buy(
+            requirements,
+            [game.purchase_payload() for game in planned_games],
+            len(planned_games),
+        )
+        result["_planned_games"] = [game.to_dict() for game in planned_games]
+        return result
+
+    def _execute_buy(self, requirements: dict[str, str], games: list[dict[str, Any]], count: int) -> dict[str, Any]:
         payload = {
             "round": requirements["round"],
             "direct": requirements["direct"],
             "nBuyAmount": str(count * 1000),
-            "param": json.dumps(
-                [
-                    {"genType": "0", "arrGameChoiceNum": None, "alpabet": slot}
-                    for slot in SLOTS[:count]
-                ],
-                separators=(",", ":"),
-            ),
+            "param": json.dumps(games, separators=(",", ":")),
             "ROUND_DRAW_DATE": requirements["draw_date"],
             "WAMT_PAY_TLMT_END_DT": requirements["limit_date"],
             "gameCnt": str(count),
@@ -416,6 +444,18 @@ class LotteryLedger:
         items = data.get("list", []) if isinstance(data, dict) else []
         return items if isinstance(items, list) else []
 
+    def reservations(self, product: str, days: int = 90, limit: int = 10) -> list[dict[str, Any]]:
+        params = reservation_search_params(product, min(days, 90), limit)
+        response = self.client.get(
+            f"{BASE_URL}/mypage/selectRstvPrchsDsctnList.do",
+            params=params,
+            headers=self.client.ajax_headers("/mypage/rstvPrchsDsctnView"),
+        )
+        payload = parse_json_response(response, context=f"{product} reservations")
+        data = payload.get("data", {}) if isinstance(payload, dict) else {}
+        items = data.get("list", []) if isinstance(data, dict) else []
+        return items if isinstance(items, list) else []
+
     def enrich_history(
         self,
         product: str,
@@ -552,6 +592,20 @@ def search_params(product: str, days: int, limit: int) -> dict[str, Any]:
     }
 
 
+def reservation_search_params(product: str, days: int, limit: int) -> dict[str, Any]:
+    end = dt.date.today()
+    start = end - dt.timedelta(days=days)
+    return {
+        "srchStrDt": start.strftime("%Y%m%d"),
+        "srchEndDt": end.strftime("%Y%m%d"),
+        "srchLtGdsCdArr": [product_code(item) for item in products_for(product)] if product == "all" else product_code(product),
+        "ordrCd": "",
+        "srchRsvtPrchsSttsCd": "",
+        "pageNum": 1,
+        "recordCountPerPage": limit,
+    }
+
+
 def product_code(product: str) -> str:
     if product == "lotto":
         return LOTTO_CODE
@@ -631,13 +685,25 @@ def format_balance(balance: int | None) -> str:
     return "확인 불가" if balance is None else f"{balance:,}원"
 
 
+def format_balance_detail(detail: dict[str, Any]) -> str:
+    if not detail:
+        return "예치금: 확인 불가"
+    total = format_money(detail.get("totalAmt") or 0)
+    current = format_money(detail.get("crntEntrsAmt") or 0)
+    reserved = format_money(detail.get("rsvtOrdrAmt") or 0)
+    unavailable = format_money(detail.get("useDsalAmt") or 0)
+    mileage = format_money(detail.get("crntMilgAmt") or 0)
+    return f"예치금: 총 {total} / 남은 예치금 {current} / 예약대기 {reserved} / 구매불가 {unavailable} / 마일리지 {mileage}"
+
+
 def format_lotto_purchase(body: dict[str, Any], balance: int | None = None) -> str:
     result = body.get("result", {}) if isinstance(body, dict) else {}
     success = str(result.get("resultMsg", "")).upper() == "SUCCESS"
     if not success:
         return f"로또 6/45 구매 실패: {result.get('resultMsg') or body.get('resultMsg') or '알 수 없음'}\n예치금: {format_balance(balance)}"
 
-    numbers = format_lotto_games(result.get("arrGameChoiceNum", []))
+    planned_games = body.get("_planned_games") if isinstance(body, dict) else None
+    numbers = format_planned_games(planned_games) if planned_games else format_lotto_games(result.get("arrGameChoiceNum", []))
     round_no = result.get("buyRound") or result.get("round") or "?"
     return f"로또 6/45 {round_no}회 구매 완료\n예치금: {format_balance(balance)}\n```text\n{numbers}\n```"
 
@@ -842,6 +908,23 @@ def format_history(product: str, items: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def format_reservations(product: str, items: list[dict[str, Any]]) -> str:
+    title = "로또 6/45" if product == "lotto" else "연금복권 720+"
+    if not items:
+        return f"{title} 예약구매 내역이 없습니다."
+
+    lines = [f"{title} 예약구매 내역"]
+    for item in items[:10]:
+        round_no = item.get("ltEpsd") or "?"
+        reserve_date = format_compact_date(item.get("rsvtPrchsDt") or "-")
+        draw_date = format_compact_date(item.get("rflDt") or "-")
+        qty = item.get("rsvtOrdrQty") or 0
+        amount = format_money(item.get("rsvtOrdrAmt") or 0)
+        status = item.get("rsvtPrchsSttsNm") or "-"
+        lines.append(f"- {round_no}회 / 예약 {reserve_date} / 추첨 {draw_date} / {qty}매 / {amount} / {status}")
+    return "\n".join(lines)
+
+
 def format_winning(product: str, items: list[dict[str, Any]]) -> str:
     title = "로또 6/45" if product == "lotto" else "연금복권 720+"
     winning_items = [item for item in items if winning_amount_value(item) > 0]
@@ -913,6 +996,17 @@ def format_money(value: Any) -> str:
     return f"{amount:,}원"
 
 
+def format_compact_date(value: Any) -> str:
+    text = str(value or "-")
+    digits = re.sub(r"\D", "", text)
+    if len(digits) >= 8:
+        date_text = f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
+        if len(digits) >= 12:
+            return f"{date_text} {digits[8:10]}:{digits[10:12]}"
+        return date_text
+    return text
+
+
 def history_winning_amount(item: dict[str, Any]) -> str:
     status = str(item.get("ltWnResult") or "")
     value = item.get("ltWnAmt")
@@ -956,7 +1050,14 @@ def build_client_and_login() -> tuple[DhlotterySession, LotteryCredentials]:
 def run_buy(args: argparse.Namespace) -> int:
     count = args.count or env_count()
     if args.dry_run:
-        print(f"DRY-RUN: {args.product} 자동구매 예정, count={count}. 실제 구매 요청은 보내지 않았습니다.")
+        messages = []
+        for product in products_for(args.product):
+            if product == "lotto" and args.lotto_strategy == "model-mix":
+                planned_games = build_lotto_purchase_plan(args.lotto_history, args.lotto_model, args.lotto_metadata)
+                messages.append("DRY-RUN: 로또 6/45 예측/검증 구매 예정\n```text\n" + format_planned_games(planned_games) + "\n```")
+            else:
+                messages.append(f"DRY-RUN: {product} 자동구매 예정, count={count}. 실제 구매 요청은 보내지 않았습니다.")
+        print("\n\n".join(messages))
         return 0
     if args.require_enabled and not require_enabled("LOTTERY_AUTO_BUY_ENABLED"):
         print("Auto buy skipped: set LOTTERY_AUTO_BUY_ENABLED=true to enable real purchases.")
@@ -966,7 +1067,12 @@ def run_buy(args: argparse.Namespace) -> int:
     messages: list[str] = []
     for product in products_for(args.product):
         if product == "lotto":
-            result = Lotto645Buyer(client).buy_auto(count)
+            if args.lotto_strategy == "model-mix":
+                if count != 5:
+                    raise LotteryBotError("Lotto model-mix strategy always buys exactly 5 lines. Use --count 5.")
+                result = Lotto645Buyer(client).buy_model_mix(args.lotto_history, args.lotto_model, args.lotto_metadata)
+            else:
+                result = Lotto645Buyer(client).buy_auto(count)
             messages.append(format_lotto_purchase(result, client.get_balance()))
         else:
             result = Pension720Buyer(client).buy_auto(count, credentials.user_id)
@@ -978,7 +1084,7 @@ def run_history(args: argparse.Namespace) -> int:
     winning_only = bool(getattr(args, "winning_only", False))
     client, _ = build_client_and_login()
     ledger = LotteryLedger(client)
-    messages = []
+    messages = [format_balance_detail(client.get_balance_detail())]
     for product in products_for(args.product):
         items = ledger.recent(product, days=args.days, limit=args.limit)
         if args.raw:
@@ -987,6 +1093,9 @@ def run_history(args: argparse.Namespace) -> int:
         if not winning_only or args.compare:
             items = ledger.enrich_history(product, items, days=args.days, compare=args.compare)
         messages.append(format_winning(product, items) if winning_only else format_history(product, items))
+        if not winning_only:
+            reservations = ledger.reservations(product, days=args.reservation_days, limit=args.limit)
+            messages.append(format_reservations(product, reservations))
     return emit_messages(messages, args.notify)
 
 
@@ -1008,6 +1117,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     buy.add_argument("--notify", action="store_true")
     buy.add_argument("--dry-run", action="store_true")
     buy.add_argument("--require-enabled", action="store_true")
+    buy.add_argument("--lotto-strategy", choices=["model-mix", "auto"], default=os.getenv("LOTTO_BUY_STRATEGY", "model-mix"))
+    buy.add_argument("--lotto-history", type=Path, default=LOTTO_HISTORY_PATH)
+    buy.add_argument("--lotto-model", type=Path, default=LOTTO_MODEL_PATH)
+    buy.add_argument("--lotto-metadata", type=Path, default=LOTTO_MODEL_METADATA_PATH)
 
     history = subparsers.add_parser("history", help="Send recent purchase/reservation history or winning notifications.")
     add_history_arguments(history)
@@ -1031,6 +1144,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def add_history_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--product", choices=["lotto", "pension", "all"], default="all")
     parser.add_argument("--days", type=int, default=14)
+    parser.add_argument("--reservation-days", type=int, default=90)
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--notify", action="store_true")
     parser.add_argument("--raw", action="store_true")

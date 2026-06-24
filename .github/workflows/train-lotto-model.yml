@@ -1,0 +1,43 @@
+name: Train Lotto Model
+
+on:
+  schedule:
+    - cron: "0 14 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Refresh lotto history
+        run: python lotto_crawler.py --output page/allLottoResults.json
+
+      - name: Train ONNX model
+        run: python train_lotto_model.py --history page/allLottoResults.json --model models/lotto_model.onnx --metadata models/lotto_model_meta.json
+
+      - name: Commit trained model
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add page/allLottoResults.json models/lotto_model.onnx models/lotto_model_meta.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: retrain lotto model (automated)"
+            git push
+          else
+            echo "No model changes to commit"
+          fi

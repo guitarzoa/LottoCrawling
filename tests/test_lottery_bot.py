@@ -2,11 +2,13 @@ import unittest
 
 from lottery_bot import (
     compare_pension_ticket,
+    format_balance_detail,
     format_history,
     format_lotto_comparison,
     format_lotto_games,
     format_lotto_purchase,
     format_pension_tickets,
+    format_reservations,
     format_winning,
     parse_args,
     parse_pension_ticket_number,
@@ -118,6 +120,11 @@ class LotteryBotFormattingTests(unittest.TestCase):
         self.assertTrue(args.winning_only)
         self.assertTrue(args.compare)
 
+    def test_buy_defaults_to_model_mix_strategy(self):
+        args = parse_args(["buy", "--product", "lotto"])
+
+        self.assertEqual(args.lotto_strategy, "model-mix")
+
     def test_winning_only_compare_explains_hidden_losing_rows(self):
         message = format_winning(
             "lotto",
@@ -125,6 +132,31 @@ class LotteryBotFormattingTests(unittest.TestCase):
         )
 
         self.assertIn("구매내역 전체 비교는 `history --product lotto --compare`", message)
+
+    def test_formats_balance_detail(self):
+        message = format_balance_detail({"totalAmt": 125000, "crntEntrsAmt": 105000, "rsvtOrdrAmt": 20000, "useDsalAmt": 20000, "crntMilgAmt": 500})
+
+        self.assertIn("총 125,000원", message)
+        self.assertIn("남은 예치금 105,000원", message)
+        self.assertIn("예약대기 20,000원", message)
+
+    def test_formats_reservation_history(self):
+        message = format_reservations(
+            "pension",
+            [
+                {
+                    "ltEpsd": 325,
+                    "rsvtPrchsDt": "2026-06-15 09:41:00",
+                    "rflDt": "20260723",
+                    "rsvtOrdrQty": 5,
+                    "rsvtOrdrAmt": 5000,
+                    "rsvtPrchsSttsNm": "예약완료",
+                }
+            ],
+        )
+
+        self.assertIn("연금복권 720+ 예약구매 내역", message)
+        self.assertIn("325회 / 예약 2026-06-15 09:41 / 추첨 2026-07-23 / 5매 / 5,000원 / 예약완료", message)
 
 
 if __name__ == "__main__":
