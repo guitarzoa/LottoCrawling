@@ -30,10 +30,9 @@ jobs:
         env:
           DHL_USER_ID: ${{ secrets.DHL_USER_ID }}
           DHL_PASSWORD: ${{ secrets.DHL_PASSWORD }}
-          LOTTERY_CHECK_ENABLED: ${{ secrets.LOTTERY_CHECK_ENABLED }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           PRODUCT="${{ github.event.inputs.product || 'all' }}"
-          python lottery_bot.py check --product "$PRODUCT" --notify --require-enabled
+          python lottery_bot.py check --product "$PRODUCT" --notify

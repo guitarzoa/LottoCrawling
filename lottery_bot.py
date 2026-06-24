@@ -572,10 +572,6 @@ def run_buy(args: argparse.Namespace) -> int:
 
 
 def run_history_or_check(args: argparse.Namespace, *, winning_only: bool) -> int:
-    if args.require_enabled and not require_enabled("LOTTERY_CHECK_ENABLED"):
-        print("Lottery check skipped: set LOTTERY_CHECK_ENABLED=true to enable account checks.")
-        return 0
-
     client, _ = build_client_and_login()
     ledger = LotteryLedger(client)
     messages = []
@@ -609,14 +605,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     history.add_argument("--days", type=int, default=14)
     history.add_argument("--limit", type=int, default=10)
     history.add_argument("--notify", action="store_true")
-    history.add_argument("--require-enabled", action="store_true")
 
     check = subparsers.add_parser("check", help="Send recent winning notifications.")
     check.add_argument("--product", choices=["lotto", "pension", "all"], default="all")
     check.add_argument("--days", type=int, default=14)
     check.add_argument("--limit", type=int, default=10)
     check.add_argument("--notify", action="store_true")
-    check.add_argument("--require-enabled", action="store_true")
 
     return parser.parse_args(argv)
 

@@ -66,12 +66,6 @@ Purchase workflows also require this explicit safety switch:
 LOTTERY_AUTO_BUY_ENABLED=true
 ```
 
-Winning-check workflows require:
-
-```text
-LOTTERY_CHECK_ENABLED=true
-```
-
 Optional:
 
 ```text
