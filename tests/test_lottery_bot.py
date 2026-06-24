@@ -118,6 +118,14 @@ class LotteryBotFormattingTests(unittest.TestCase):
         self.assertTrue(args.winning_only)
         self.assertTrue(args.compare)
 
+    def test_winning_only_compare_explains_hidden_losing_rows(self):
+        message = format_winning(
+            "lotto",
+            [{"ltEpsdView": "1229", "ltWnAmt": "0", "_compare_lines": ["당첨번호: 12, 13, 29, 34, 37, 42 + 보너스 16"]}],
+        )
+
+        self.assertIn("구매내역 전체 비교는 `history --product lotto --compare`", message)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -100,8 +100,11 @@ python lottery_bot.py history --product all --notify
 # 최근 구매/예약 내역에 당첨번호 비교까지 포함
 python lottery_bot.py history --product all --compare
 
-# 당첨된 내역만 조회하고 구매번호 비교 결과를 포함해 디스코드로 전송
-python lottery_bot.py history --product all --winning-only --compare --notify
+# 최근 구매/예약 내역과 당첨번호 비교 결과를 디스코드로 전송
+python lottery_bot.py history --product all --compare --notify
+
+# 당첨금이 있는 내역만 보고 싶을 때만 사용
+python lottery_bot.py history --product all --winning-only --notify
 ```
 
 ### Account bot commands
@@ -110,7 +113,7 @@ python lottery_bot.py history --product all --winning-only --compare --notify
 | --- | --- |
 | `buy` | 로또 6/45, 연금복권 720+ 자동구매를 실행합니다. 실제 구매 명령이므로 기본적으로 GitHub Actions에서는 `LOTTERY_AUTO_BUY_ENABLED=true`가 있어야 동작하게 해두었습니다. |
 | `history` | 최근 구매/예약 내역을 조회합니다. `--compare`를 붙이면 당첨번호와 내 구매번호를 같이 비교합니다. |
-| `check` | `history --winning-only`와 같은 호환용 별칭입니다. 새 명령이나 Actions에서는 `history --winning-only` 사용을 권장합니다. |
+| `check` | `history --winning-only`와 같은 호환용 별칭입니다. 구매내역 전체와 당첨번호를 비교하려면 `history --compare`를 사용합니다. |
 
 ### Account bot options
 
@@ -126,8 +129,8 @@ python lottery_bot.py history --product all --winning-only --compare --notify
 | `--days NUMBER` | `history`, `check` | `14` | 최근 며칠 동안의 구매/예약 내역을 조회할지 지정합니다. |
 | `--limit NUMBER` | `history`, `check` | `10` | 조회할 최대 내역 개수입니다. |
 | `--raw` | `history`, `check` | off | 동행복권 원본 응답 JSON을 그대로 출력합니다. 필드 확인이나 디버깅용입니다. |
-| `--compare` | `history`, `check` | off | 구매번호와 당첨번호를 비교해 일치 번호, 보너스, 등수/낙첨 정보를 함께 표시합니다. |
-| `--winning-only` | `history` | off | 당첨금이 있는 내역만 출력합니다. 기존 `check` 명령의 주 역할입니다. |
+| `--compare` | `history`, `check` | off | 구매번호와 당첨번호를 비교해 일치 번호, 보너스, 등수/낙첨 정보를 함께 표시합니다. 구매내역 전체 비교는 `history --compare`를 사용합니다. |
+| `--winning-only` | `history` | off | 당첨금이 있는 내역만 출력합니다. 낙첨 내역의 비교 결과도 숨겨지므로, 구매내역 전체 비교에는 붙이지 않습니다. |
 
 ### Environment variables
 

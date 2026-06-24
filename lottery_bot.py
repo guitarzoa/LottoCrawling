@@ -846,7 +846,10 @@ def format_winning(product: str, items: list[dict[str, Any]]) -> str:
     title = "로또 6/45" if product == "lotto" else "연금복권 720+"
     winning_items = [item for item in items if winning_amount_value(item) > 0]
     if not winning_items:
-        return f"{title} 최근 당첨 내역이 없습니다. 다음 기회를 노려봐요."
+        message = f"{title} 최근 당첨 내역이 없습니다. 다음 기회를 노려봐요."
+        if any(item.get("_compare_lines") for item in items):
+            message += f"\n구매내역 전체 비교는 `history --product {product} --compare`로 확인하세요."
+        return message
 
     lines = [f"{title} 당첨 알림"]
     for item in winning_items[:10]:
@@ -1008,10 +1011,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
     history = subparsers.add_parser("history", help="Send recent purchase/reservation history or winning notifications.")
     add_history_arguments(history)
-    history.add_argument("--winning-only", action="store_true", help="Only send entries with winning amounts.")
+    history.add_argument(
+        "--winning-only",
+        action="store_true",
+        help="Only send entries with winning amounts. Losing comparison rows are hidden.",
+    )
     history.set_defaults(winning_only=False)
 
-    check = subparsers.add_parser("check", help="Compatibility alias for history --winning-only.")
+    check = subparsers.add_parser(
+        "check",
+        help="Compatibility alias for history --winning-only. Use history --compare for full comparisons.",
+    )
     add_history_arguments(check)
     check.set_defaults(winning_only=True)
 
