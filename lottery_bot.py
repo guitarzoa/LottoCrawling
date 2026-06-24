@@ -402,6 +402,7 @@ class Pension720Buyer:
 class LotteryLedger:
     def __init__(self, client: DhlotterySession) -> None:
         self.client = client
+        self._pension_draw_cache: dict[int, dict[str, Any] | None] = {}
 
     def recent(self, product: str, days: int = 14, limit: int = 10) -> list[dict[str, Any]]:
         params = search_params(product, days, limit)
@@ -415,14 +416,20 @@ class LotteryLedger:
         items = data.get("list", []) if isinstance(data, dict) else []
         return items if isinstance(items, list) else []
 
-    def enrich_history(self, product: str, items: list[dict[str, Any]], days: int = 14) -> list[dict[str, Any]]:
+    def enrich_history(
+        self,
+        product: str,
+        items: list[dict[str, Any]],
+        days: int = 14,
+        compare: bool = False,
+    ) -> list[dict[str, Any]]:
         cache: dict[tuple[Any, ...], dict[str, Any]] = {}
         enriched = []
         params = search_params(product, days, max(len(items), 10))
         for item in items:
-            key = (product, item.get("ntslOrdrNo"), item.get("ltEpsd"), item.get("gmInfo"))
+            key = (product, item.get("ntslOrdrNo"), item.get("ltEpsd"), item.get("gmInfo"), compare)
             if key not in cache:
-                cache[key] = self.detail_summary(product, item, params)
+                cache[key] = self.detail_summary(product, item, params, compare=compare)
             merged = dict(item)
             merged.update(cache[key])
             enriched.append(merged)
@@ -433,25 +440,32 @@ class LotteryLedger:
         product: str,
         item: dict[str, Any],
         params: dict[str, Any],
+        compare: bool = False,
     ) -> dict[str, Any]:
         try:
             if product == "lotto":
                 detail = self._lotto_detail(item, params)
                 ticket = detail.get("ticket", {}) if isinstance(detail, dict) else {}
-                return {
+                summary = {
                     "_purchase_amount": ticket.get("ticket_amt"),
                     "_detail_count": len(ticket.get("game_dtl") or []),
                     "_win_total_amount": ticket.get("win_total_amt"),
                 }
+                if compare:
+                    summary["_compare_lines"] = format_lotto_comparison(ticket)
+                return summary
 
             detail = self._pension_detail(item)
             rows = detail.get("list", []) if isinstance(detail, dict) else []
             purchase_amount = sum(int(row.get("prchsAmt") or 0) for row in rows)
-            return {
+            summary = {
                 "_purchase_amount": purchase_amount if rows else None,
                 "_detail_count": len(rows),
                 "_win_total_amount": sum(int(row.get("ltWnAmt") or 0) for row in rows),
             }
+            if compare:
+                summary["_compare_lines"] = self._pension_compare_lines(item, rows)
+            return summary
         except Exception as exc:
             return {"_detail_error": f"{type(exc).__name__}: {exc}"}
 
@@ -479,6 +493,51 @@ class LotteryLedger:
         )
         payload = parse_json_response(response, context="pension detail")
         return payload.get("data", payload)
+
+    def _pension_compare_lines(self, item: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
+        round_no = to_int(item.get("ltEpsd") or first_present_from_rows(rows, "ltEpsd", "psltEpsd"))
+        tickets = [ticket for ticket in (parse_pension_ticket_number(row.get("ltGmInfoCn") or row.get("gmInfo")) for row in rows) if ticket]
+        if not tickets:
+            return ["비교할 연금복권 구매번호가 없습니다."]
+        if round_no is None:
+            return ["회차 정보를 확인할 수 없어 당첨번호와 비교하지 못했습니다."]
+
+        draw = self.pension_draw_result(round_no)
+        if not draw:
+            return ["아직 추첨 전이거나 당첨번호가 공개되지 않아 비교할 수 없습니다."]
+
+        lines = [format_pension_draw_header(draw)]
+        for ticket in tickets:
+            result = compare_pension_ticket(ticket, draw)
+            lines.append(format_pension_comparison_line(ticket, result))
+        return lines
+
+    def pension_draw_result(self, round_no: int) -> dict[str, Any] | None:
+        if round_no in self._pension_draw_cache:
+            return self._pension_draw_cache[round_no]
+
+        response = self.client.get(
+            f"{BASE_URL}/pt720/selectPstPt720WnList.do",
+            headers=self.client.ajax_headers("/pt720/result", f"{BASE_URL}/pt720/result"),
+        )
+        payload = parse_json_response(response, context="pension winning numbers")
+        data = payload.get("data", {}) if isinstance(payload, dict) else {}
+        rows = data.get("result", []) if isinstance(data, dict) else []
+
+        draw: dict[str, Any] | None = None
+        for row in rows if isinstance(rows, list) else []:
+            if to_int(row.get("psltEpsd")) == round_no:
+                draw = {
+                    "round": round_no,
+                    "date": row.get("psltRflYmd"),
+                    "group": str(row.get("wnBndNo") or ""),
+                    "number": str(row.get("wnRnkVl") or "").zfill(6),
+                    "bonus": str(row.get("bnsRnkVl") or "").zfill(6),
+                }
+                break
+
+        self._pension_draw_cache[round_no] = draw
+        return draw
 
 
 def search_params(product: str, days: int, limit: int) -> dict[str, Any]:
@@ -616,29 +675,176 @@ def format_pension_tickets(raw: str) -> str:
     return "\n".join(lines) if lines else "번호 정보 없음"
 
 
+def format_lotto_comparison(ticket: dict[str, Any]) -> list[str]:
+    winning_numbers = parse_ints(ticket.get("win_num"))
+    games = ticket.get("game_dtl") if isinstance(ticket, dict) else []
+    if len(winning_numbers) < 6:
+        return ["로또 당첨번호를 확인할 수 없습니다."]
+
+    main_numbers = winning_numbers[:6]
+    bonus_number = winning_numbers[6] if len(winning_numbers) > 6 else None
+    lines = [format_lotto_draw_header(main_numbers, bonus_number)]
+
+    for index, game in enumerate(games if isinstance(games, list) else [], start=1):
+        numbers = parse_ints(game.get("num") if isinstance(game, dict) else game)
+        if not numbers:
+            continue
+        if isinstance(game, dict):
+            label = str(game.get("idx") or (SLOTS[index - 1] if index <= len(SLOTS) else index))
+            rank = game.get("rank")
+            amount = game.get("amt")
+        else:
+            label = str(index)
+            rank = None
+            amount = None
+        matched = sorted(set(numbers).intersection(main_numbers))
+        bonus_matched = bonus_number in numbers if bonus_number is not None else False
+        result = format_rank_result(rank, amount)
+        lines.append(format_lotto_comparison_line(label, numbers, matched, bonus_matched, result))
+
+    return lines if len(lines) > 1 else lines + ["비교할 로또 구매번호가 없습니다."]
+
+
+def format_lotto_draw_header(main_numbers: list[int], bonus_number: int | None) -> str:
+    bonus = f" + 보너스 {bonus_number:02d}" if bonus_number is not None else ""
+    return "당첨번호: " + ", ".join(f"{number:02d}" for number in main_numbers) + bonus
+
+
+def format_lotto_comparison_line(
+    label: str,
+    numbers: list[int],
+    matched: list[int],
+    bonus_matched: bool,
+    result: str,
+) -> str:
+    match_text = ", ".join(f"{number:02d}" for number in matched) if matched else "-"
+    bonus_text = "일치" if bonus_matched else "-"
+    return (
+        f"{label}: {', '.join(f'{number:02d}' for number in numbers[:6])} "
+        f"/ 당첨번호 {len(matched)}개({match_text}) / 보너스 {bonus_text} / {result}"
+    )
+
+
+def format_rank_result(rank: Any, amount: Any = None) -> str:
+    rank_number = to_int(rank)
+    if not rank_number:
+        return "낙첨"
+    amount_number = to_int(amount)
+    if amount_number:
+        return f"{rank_number}등 / {amount_number:,}원"
+    return f"{rank_number}등"
+
+
+def parse_pension_ticket_number(raw: Any) -> dict[str, str] | None:
+    if raw in (None, ""):
+        return None
+    text = str(raw).strip()
+    if ":" in text:
+        group, number = text.split(":", 1)
+        group = re.sub(r"\D", "", group)
+        number = re.sub(r"\D", "", number)
+    else:
+        digits = re.sub(r"\D", "", text)
+        group, number = digits[:1], digits[1:7]
+    if not group or len(number) != 6:
+        return None
+    return {"group": group, "number": number, "full": f"{group}{number}"}
+
+
+def format_pension_draw_header(draw: dict[str, Any]) -> str:
+    return f"당첨번호: {draw.get('group')}조 {draw.get('number')} / 보너스 {draw.get('bonus')}"
+
+
+def compare_pension_ticket(ticket: dict[str, str], draw: dict[str, Any]) -> str:
+    group = ticket["group"]
+    number = ticket["number"]
+    winning_group = str(draw.get("group") or "")
+    winning_number = str(draw.get("number") or "").zfill(6)
+    bonus_number = str(draw.get("bonus") or "").zfill(6)
+
+    if group == winning_group and number == winning_number:
+        return "1등"
+    if number == winning_number:
+        return "2등"
+    if number == bonus_number:
+        return "보너스"
+    if number[-5:] == winning_number[-5:]:
+        return "3등"
+    if number[-4:] == winning_number[-4:]:
+        return "4등"
+    if number[-3:] == winning_number[-3:]:
+        return "5등"
+    if number[-2:] == winning_number[-2:]:
+        return "6등"
+    if number[-1:] == winning_number[-1:]:
+        return "7등"
+    return "낙첨"
+
+
+def format_pension_comparison_line(ticket: dict[str, str], result: str) -> str:
+    return f"{ticket['group']}조 {ticket['number']} / {result}"
+
+
+def parse_ints(value: Any) -> list[int]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        values = value
+    else:
+        values = re.findall(r"\d+", str(value))
+    numbers: list[int] = []
+    for item in values:
+        number = to_int(item)
+        if number is not None:
+            numbers.append(number)
+    return numbers
+
+
+def to_int(value: Any) -> int | None:
+    try:
+        return int(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def first_present_from_rows(rows: list[dict[str, Any]], *fields: str) -> Any:
+    for row in rows:
+        for field in fields:
+            value = row.get(field)
+            if value not in (None, ""):
+                return value
+    return None
+
+
 def format_history(product: str, items: list[dict[str, Any]]) -> str:
     title = "로또 6/45" if product == "lotto" else "연금복권 720+"
     if not items:
         return f"{title} 최근 구매/예약 내역이 없습니다."
 
     lines = [f"{title} 최근 구매/예약 내역"]
-    grouped: dict[tuple[str, str, str, str, str], int] = {}
+    grouped: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     for item in items:
         key = history_summary_key(item)
-        grouped[key] = grouped.get(key, 0) + 1
+        entry = grouped.setdefault(key, {"count": 0, "compare_lines": []})
+        entry["count"] += 1
+        compare_lines = item.get("_compare_lines")
+        if compare_lines and not entry["compare_lines"]:
+            entry["compare_lines"] = compare_lines
 
-    for (round_no, date, purchase_amount, winning_amount, status), count in list(grouped.items())[:10]:
-        count_text = f" / {count}건" if count > 1 else ""
+    for (round_no, date, purchase_amount, winning_amount, status), entry in list(grouped.items())[:10]:
+        count_text = f" / {entry['count']}건" if entry["count"] > 1 else ""
         status_text = f" / {status}" if status else ""
         lines.append(
             f"- {round_no}회 / {date}{count_text} / 구매금액 {purchase_amount} / 당첨금 {winning_amount}{status_text}"
         )
+        for compare_line in entry["compare_lines"]:
+            lines.append(f"  · {compare_line}")
     return "\n".join(lines)
 
 
 def format_winning(product: str, items: list[dict[str, Any]]) -> str:
     title = "로또 6/45" if product == "lotto" else "연금복권 720+"
-    winning_items = [item for item in items if int(str(item.get("ltWnAmt") or "0").replace(",", "") or 0) > 0]
+    winning_items = [item for item in items if winning_amount_value(item) > 0]
     if not winning_items:
         return f"{title} 최근 당첨 내역이 없습니다. 다음 기회를 노려봐요."
 
@@ -646,9 +852,18 @@ def format_winning(product: str, items: list[dict[str, Any]]) -> str:
     for item in winning_items[:10]:
         round_no = item.get("ltEpsdView") or item.get("ltEpsd") or "?"
         date = item.get("epsdRflDt") or item.get("eltOrdrDt") or "-"
-        amount = int(str(item.get("ltWnAmt") or "0").replace(",", ""))
+        amount = winning_amount_value(item)
         lines.append(f"- {round_no}회 / {date} / {amount:,}원 당첨")
+        for compare_line in item.get("_compare_lines") or []:
+            lines.append(f"  · {compare_line}")
     return "\n".join(lines)
+
+
+def winning_amount_value(item: dict[str, Any]) -> int:
+    value = item.get("_win_total_amount")
+    if value in (None, ""):
+        value = item.get("ltWnAmt")
+    return to_int(value) or 0
 
 
 def history_summary_key(item: dict[str, Any]) -> tuple[str, str, str, str, str]:
@@ -765,8 +980,8 @@ def run_history_or_check(args: argparse.Namespace, *, winning_only: bool) -> int
         if args.raw:
             messages.append(f"{product} raw ledger\n```json\n{json.dumps(items, ensure_ascii=False, indent=2)}\n```")
             continue
-        if not winning_only:
-            items = ledger.enrich_history(product, items, days=args.days)
+        if not winning_only or args.compare:
+            items = ledger.enrich_history(product, items, days=args.days, compare=args.compare)
         messages.append(format_winning(product, items) if winning_only else format_history(product, items))
     return emit_messages(messages, args.notify)
 
@@ -796,6 +1011,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     history.add_argument("--limit", type=int, default=10)
     history.add_argument("--notify", action="store_true")
     history.add_argument("--raw", action="store_true")
+    history.add_argument("--compare", action="store_true", help="Compare purchased numbers with winning numbers.")
 
     check = subparsers.add_parser("check", help="Send recent winning notifications.")
     check.add_argument("--product", choices=["lotto", "pension", "all"], default="all")
@@ -803,6 +1019,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     check.add_argument("--limit", type=int, default=10)
     check.add_argument("--notify", action="store_true")
     check.add_argument("--raw", action="store_true")
+    check.add_argument("--compare", action="store_true", help="Load purchase details before checking winnings.")
 
     return parser.parse_args(argv)
 
