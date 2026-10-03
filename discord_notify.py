@@ -49,12 +49,16 @@ def format_latest_result_message(result: dict[str, Any]) -> str:
 
 
 def send_discord_message(content: str) -> bool:
+    return send_discord_payload({"content": content})
+
+
+def send_discord_payload(payload: dict[str, Any]) -> bool:
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
     bot_token = os.getenv("DISCORD_BOT_TOKEN", "").strip()
     channel_id = os.getenv("DISCORD_CHANNEL_ID", "").strip()
 
     if webhook_url:
-        response = requests.post(webhook_url, json={"content": content}, timeout=20)
+        response = requests.post(webhook_url, json=payload, timeout=20)
         if response.status_code not in {200, 204}:
             raise DiscordNotifyError(f"Discord webhook send failed: HTTP {response.status_code} {response.text}")
         return True
@@ -67,7 +71,7 @@ def send_discord_message(content: str) -> bool:
                 "Content-Type": "application/json",
                 "User-Agent": "LottoCrawling/1.0",
             },
-            json={"content": content},
+            json=payload,
             timeout=20,
         )
         if response.status_code not in {200, 201}:

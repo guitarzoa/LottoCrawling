@@ -16,7 +16,7 @@ from typing import Any, Iterable
 import requests
 from bs4 import BeautifulSoup
 
-from discord_notify import send_discord_message
+from discord_notify import send_discord_message, send_discord_payload
 from lotto_predictor import (
     LOTTO_HISTORY_PATH,
     LOTTO_MODEL_METADATA_PATH,
@@ -493,6 +493,7 @@ class LotteryLedger:
                 }
                 if compare:
                     summary["_compare_lines"] = format_lotto_comparison(ticket)
+                    summary["_compare"] = lotto_compare_data(ticket)
                 return summary
 
             detail = self._pension_detail(item)
@@ -505,6 +506,7 @@ class LotteryLedger:
             }
             if compare:
                 summary["_compare_lines"] = self._pension_compare_lines(item, rows)
+                summary["_compare"] = self._pension_compare_data(item, rows)
             return summary
         except Exception as exc:
             return {"_detail_error": f"{type(exc).__name__}: {exc}"}
@@ -551,6 +553,24 @@ class LotteryLedger:
             result = compare_pension_ticket(ticket, draw)
             lines.append(format_pension_comparison_line(ticket, result))
         return lines
+
+    def _pension_compare_data(self, item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+        round_no = to_int(item.get("ltEpsd") or first_present_from_rows(rows, "ltEpsd", "psltEpsd"))
+        tickets = [ticket for ticket in (parse_pension_ticket_number(row.get("ltGmInfoCn") or row.get("gmInfo")) for row in rows) if ticket]
+        if not tickets or round_no is None:
+            return None
+        draw = self.pension_draw_result(round_no)
+        if not draw:
+            return None
+        return {
+            "group": str(draw.get("group") or ""),
+            "number": str(draw.get("number") or ""),
+            "bonus": str(draw.get("bonus") or ""),
+            "tickets": [
+                {"group": ticket["group"], "number": ticket["number"], "result": compare_pension_ticket(ticket, draw)}
+                for ticket in tickets
+            ],
+        }
 
     def pension_draw_result(self, round_no: int) -> dict[str, Any] | None:
         if round_no in self._pension_draw_cache:
@@ -774,6 +794,127 @@ def format_lotto_comparison(ticket: dict[str, Any]) -> list[str]:
 def format_lotto_draw_header(main_numbers: list[int], bonus_number: int | None) -> str:
     bonus = f" + 보너스 {bonus_number:02d}" if bonus_number is not None else ""
     return "당첨번호: " + ", ".join(f"{number:02d}" for number in main_numbers) + bonus
+
+
+def lotto_compare_data(ticket: dict[str, Any]) -> dict[str, Any] | None:
+    winning_numbers = parse_ints(ticket.get("win_num"))
+    games = ticket.get("game_dtl") if isinstance(ticket, dict) else []
+    if len(winning_numbers) < 6:
+        return None
+
+    main_numbers = winning_numbers[:6]
+    bonus_number = winning_numbers[6] if len(winning_numbers) > 6 else None
+    parsed_games: list[dict[str, Any]] = []
+    for index, game in enumerate(games if isinstance(games, list) else [], start=1):
+        numbers = parse_ints(game.get("num") if isinstance(game, dict) else game)
+        if not numbers:
+            continue
+        if isinstance(game, dict):
+            label = str(game.get("idx") or (SLOTS[index - 1] if index <= len(SLOTS) else index))
+            rank = game.get("rank")
+            amount = game.get("amt")
+        else:
+            label = str(index)
+            rank = None
+            amount = None
+        parsed_games.append(
+            {
+                "label": label,
+                "numbers": numbers[:6],
+                "matched": sorted(set(numbers).intersection(main_numbers)),
+                "bonus_matched": bonus_number in numbers if bonus_number is not None else False,
+                "rank": to_int(rank),
+                "amount": to_int(amount),
+            }
+        )
+    return {"main_numbers": main_numbers, "bonus_number": bonus_number, "games": parsed_games}
+
+
+def format_compare_detail_lines(compare: dict[str, Any]) -> tuple[list[str], int, int]:
+    lines: list[str] = []
+    won = 0
+    lost = 0
+    if "main_numbers" in compare:
+        main = ", ".join(f"{number:02d}" for number in compare["main_numbers"])
+        bonus = compare.get("bonus_number")
+        bonus_text = f" + 보너스 **{bonus:02d}**" if bonus is not None else ""
+        lines.append(f"당첨번호: {main}{bonus_text}")
+        for game in compare.get("games", []):
+            if game.get("rank"):
+                matched = set(game["matched"])
+                numbers = ", ".join(
+                    f"**{number:02d}**" if number in matched else f"{number:02d}" for number in game["numbers"]
+                )
+                line = f"🎯 {game['label']}: {numbers} → {format_rank_result(game['rank'], game['amount'])}"
+                if game.get("bonus_matched"):
+                    line += " 🎁 보너스 일치"
+                lines.append(line)
+                won += 1
+            else:
+                lost += 1
+    else:
+        lines.append(f"당첨번호: {compare.get('group')}조 {compare.get('number')} / 보너스 {compare.get('bonus')}")
+        for ticket in compare.get("tickets", []):
+            if ticket["result"] != "낙첨":
+                lines.append(f"🎯 {ticket['group']}조 {ticket['number']} → {ticket['result']}")
+                won += 1
+            else:
+                lost += 1
+    if lost:
+        lines.append(f"낙첨 {lost}건")
+    return lines, won, lost
+
+
+def build_history_embed(
+    product: str,
+    items: list[dict[str, Any]],
+    balance_detail: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    title = "로또 6/45 당첨 확인" if product == "lotto" else "연금복권 720+ 당첨 확인"
+    winning_items = [item for item in items if winning_amount_value(item) > 0]
+    embed: dict[str, Any] = {
+        "title": title,
+        "color": 0x2ECC71 if winning_items else 0x95A5A6,
+        "description": "",
+    }
+
+    sections: list[str] = []
+    lost_tickets = 0
+    for item in items[:10]:
+        compare = item.get("_compare")
+        if isinstance(compare, dict):
+            lines, won, _ = format_compare_detail_lines(compare)
+            if won:
+                round_no = item.get("ltEpsdView") or item.get("ltEpsd") or "?"
+                date = format_compact_date(item.get("epsdRflDt") or item.get("eltOrdrDt"))
+                sections.append(f"**{round_no}회** / {date}\n" + "\n".join(lines))
+            else:
+                lost_tickets += 1
+            continue
+
+        amount = winning_amount_value(item)
+        if amount > 0:
+            round_no = item.get("ltEpsdView") or item.get("ltEpsd") or "?"
+            date = format_compact_date(item.get("epsdRflDt") or item.get("eltOrdrDt"))
+            sections.append(f"🎯 **{round_no}회** / {date} / {amount:,}원 당첨")
+        else:
+            lost_tickets += 1
+
+    if sections:
+        description = "\n\n".join(sections)
+        if lost_tickets:
+            description += f"\n\n그 외 구매 내역 {lost_tickets}건은 모두 낙첨입니다."
+    else:
+        description = "당첨된 내역이 없습니다. 다음 기회를 노려봐요."
+        if lost_tickets:
+            description += f" (확인한 티켓 {lost_tickets}건)"
+
+    if len(description) > 4000:
+        description = description[:3990] + "..."
+    embed["description"] = description
+    if balance_detail:
+        embed["footer"] = {"text": format_balance_detail(balance_detail)}
+    return embed
 
 
 def format_lotto_comparison_line(
@@ -1084,8 +1225,10 @@ def run_history(args: argparse.Namespace) -> int:
     winning_only = bool(getattr(args, "winning_only", False))
     client, _ = build_client_and_login()
     ledger = LotteryLedger(client)
-    messages = [format_balance_detail(client.get_balance_detail())]
-    for product in products_for(args.product):
+    balance_detail = client.get_balance_detail()
+    messages = [format_balance_detail(balance_detail)]
+    embeds: list[dict[str, Any]] = []
+    for index, product in enumerate(products_for(args.product)):
         items = ledger.recent(product, days=args.days, limit=args.limit)
         if args.raw:
             messages.append(f"{product} raw ledger\n```json\n{json.dumps(items, ensure_ascii=False, indent=2)}\n```")
@@ -1093,10 +1236,20 @@ def run_history(args: argparse.Namespace) -> int:
         if not winning_only or args.compare:
             items = ledger.enrich_history(product, items, days=args.days, compare=args.compare)
         messages.append(format_winning(product, items) if winning_only else format_history(product, items))
+        if args.notify:
+            embeds.append(build_history_embed(product, items, balance_detail if index == 0 else None))
         if not winning_only:
             reservations = ledger.reservations(product, days=args.reservation_days, limit=args.limit)
             messages.append(format_reservations(product, reservations))
-    return emit_messages(messages, args.notify)
+
+    content = "\n\n".join(messages)
+    print(content)
+    if args.notify:
+        if embeds:
+            send_discord_payload({"embeds": embeds})
+        else:
+            send_discord_message(content)
+    return 0
 
 
 def emit_messages(messages: list[str], notify: bool) -> int:

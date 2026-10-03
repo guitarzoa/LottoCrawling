@@ -1,6 +1,7 @@
 import unittest
 
 from lottery_bot import (
+    build_history_embed,
     compare_pension_ticket,
     format_balance_detail,
     format_history,
@@ -10,6 +11,7 @@ from lottery_bot import (
     format_pension_tickets,
     format_reservations,
     format_winning,
+    lotto_compare_data,
     parse_args,
     parse_pension_ticket_number,
 )
@@ -139,6 +141,52 @@ class LotteryBotFormattingTests(unittest.TestCase):
         self.assertIn("총 125,000원", message)
         self.assertIn("남은 예치금 105,000원", message)
         self.assertIn("예약대기 20,000원", message)
+
+    def test_lotto_compare_data_extracts_matches(self):
+        ticket = {
+            "win_num": [12, 13, 29, 34, 37, 42, 16],
+            "game_dtl": [
+                {"idx": "A", "num": [1, 4, 12, 27, 31, 43], "rank": 0, "amt": 0},
+                {"idx": "B", "num": [12, 13, 16, 29, 31, 43], "rank": 2, "amt": 3000000},
+            ],
+        }
+
+        compare = lotto_compare_data(ticket)
+
+        self.assertEqual(compare["main_numbers"], [12, 13, 29, 34, 37, 42])
+        self.assertEqual(compare["bonus_number"], 16)
+        self.assertEqual(compare["games"][0]["matched"], [12])
+        self.assertTrue(compare["games"][1]["bonus_matched"])
+        self.assertEqual(compare["games"][1]["rank"], 2)
+
+    def test_build_history_embed_highlights_wins_and_summarizes_losses(self):
+        ticket = {
+            "win_num": [12, 13, 29, 34, 37, 42, 16],
+            "game_dtl": [
+                {"idx": "A", "num": [1, 4, 12, 27, 31, 43], "rank": 0, "amt": 0},
+                {"idx": "B", "num": [12, 13, 16, 29, 31, 43], "rank": 2, "amt": 3000000},
+            ],
+        }
+        items = [
+            {"ltEpsdView": "1230", "epsdRflDt": "20260627", "_compare": lotto_compare_data(ticket), "_win_total_amount": 3000000},
+            {"ltEpsdView": "1229", "epsdRflDt": "20260620", "_compare": {"main_numbers": [1, 2, 3, 4, 5, 6], "bonus_number": 7, "games": [{"label": "A", "numbers": [8, 9, 10, 11, 12, 13], "matched": [], "bonus_matched": False, "rank": None, "amount": None}]}, "_win_total_amount": 0},
+        ]
+
+        embed = build_history_embed("lotto", items, {"totalAmt": 5000})
+
+        self.assertEqual(embed["color"], 0x2ECC71)
+        self.assertIn("🎯 B: **12**, **13**, 16, **29**, 31, 43 → 2등 / 3,000,000원 🎁 보너스 일치", embed["description"])
+        self.assertIn("낙첨 1건", embed["description"])
+        self.assertIn("그 외 구매 내역 1건은 모두 낙첨입니다.", embed["description"])
+        self.assertIn("총 5,000원", embed["footer"]["text"])
+
+    def test_build_history_embed_gray_when_no_win(self):
+        items = [{"ltEpsdView": "1230", "_win_total_amount": 0}]
+
+        embed = build_history_embed("pension", items)
+
+        self.assertEqual(embed["color"], 0x95A5A6)
+        self.assertIn("당첨된 내역이 없습니다", embed["description"])
 
     def test_formats_reservation_history(self):
         message = format_reservations(
